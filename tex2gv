@@ -1,0 +1,66 @@
+#!/usr/bin/env ruby
+
+require 'tempfile'
+require 'rake'
+
+class Environment
+  attr_accessor :content
+  def my_label
+    m = /\\label\{(.*?)\}/.match(@content)
+    if m.nil?
+      "anon-#{self.object_id}"
+    else
+      m[1]
+    end
+  end
+  def references
+    @content.scan(/\\c?ref\{(.*?)\}/i).map do |s|
+      s.first.split(',')
+    end.flatten.uniq
+  end
+end
+
+class LaTeXDoc
+  attr_accessor :document
+  attr_accessor :name
+
+  def initialize(name='')
+    if name.empty?
+      @name = "anon-#{self.object_id}"
+    else
+      @name = name
+    end
+  end
+
+  def proofy_environments
+    @document.scan(/\\begin\{(proposition|lemma|corollary|theorem)\}(.*?)\\end\{\1\}/m).map do |m|
+      e = Environment.new
+      e.content = m[1]
+      e
+    end
+  end
+
+  def proof_graph
+    g = %Q(digraph "#{@name}" {\n)
+    self.proofy_environments.each do |e|
+      e.references.each do |r|
+        g << %Q(  "#{r}" -> "#{e.my_label}";\n)
+      end
+    end
+    g << "}\n"
+    g
+  end
+end
+
+doc = LaTeXDoc.new(File.basename(ARGV[0]))
+doc.document = File.read(ARGV[0])
+
+f = Tempfile.new
+f.write(doc.proof_graph)
+f.close
+
+begin
+  `ccomps -x '#{f.path}' | dot | gvpack -array1 | neato -Tpng -n2 -o '#{ARGV[0].ext('png')}'`
+ensure
+  f.unlink
+end
